@@ -1,1 +1,1 @@
-# paper_sorter
+# Paper Collector
