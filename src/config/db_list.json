@@ -3,7 +3,7 @@
     {
         "paper_db":
         {
-            "path":"./paper.sqlite3"
+            "path":"paper.sqlite3"
         }
     }
 }
