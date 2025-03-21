@@ -1,8 +1,7 @@
 import os, json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-BASEFOLDER = os.getcwd()
+BASEFOLDER = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
 class SqliteConnector:
     engine = {}

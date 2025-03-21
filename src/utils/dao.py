@@ -57,7 +57,8 @@ class PaperProcessor:
     def __init__(self, paperData:PaperInfo):
         self.paperData = paperData.get_data()
         self.PaperInfo = paperData
-
+        self.CreateOrIgnorePaperTable()
+        
     def WritePaperInfo(self, target_path:str , paperData=None):
 
         def attachCurrentDate():
@@ -94,7 +95,40 @@ class PaperProcessor:
             with open(note_path, 'w') as fp:
                 fp.write(f"![[{paperId}-intro]]")
             
+    def CreateOrIgnorePaperTable(self):
+        sql = """
+CREATE TABLE IF NOT EXISTS paper_information
+(
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+identifyId VARCHAR(128) NOT NULL,
+paperId VARCHAR(128) NOT NULL,
+title VARCHAR(256) NOT NULL,
+authors TEXT NOT NULL,
+citationCount INT NOT NULL DEFAULT 0,
+publicationDate DATE NOT NULL,
+fieldsOfStudy VARCHAR(128) NOT NULL,
+url TEXT NOT NULL,
+location TEXT NOT NULL,
+paperPath TEXT NOT NULL
+);
 
+CREATE UNIQUE INDEX IF NOT EXISTS paperId_index ON paper_information(paperId);
+
+
+CREATE TABLE IF NOT EXISTS paper_link
+(
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+source_id INT NOT NULL,
+citation_id INT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS paper_source_query ON paper_link(source_id);
+CREATE INDEX IF NOT EXISTS paper_citation_query ON paper_link(citation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS paper_link_pair ON paper_link(source_id, citation_id);
+"""
+        return SqliteHelper('paper_db').ExecuteUpdate(sql)
+
+        
     def GeneratePaperSetting(self, target_dir:str):
         data = dict()
         data.update(self.paperData)
