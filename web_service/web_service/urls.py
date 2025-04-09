@@ -17,10 +17,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 import api.views
+app_name = 'Companies'
+
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path("api/paper/folder", api.views.FindPaperByFolder),
-    path("api/paper/doi", api.views.FindPaperByDoi),
-    path("api/paper/title", api.views.FindPaperByTitle),
-    path("api/paper/arxiv_id", api.views.FindPaperByArxivId),
+    path("api/paper/search/paperIds", api.views.FindPaperByPaperIds),
+    path("api/paper/search/doi", api.views.FindPaperByDoi),
+    path("api/paper/search/title", api.views.FindPaperByTitle),
+    path("api/paper/search/arxiv_id", api.views.FindPaperByArxivId),
 ]

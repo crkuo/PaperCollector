@@ -1,10 +1,21 @@
 import os , sys, datetime, shutil, json, re
-from utils.dao import SemanticScholarTool, PaperProcessor
-from component.paper_info import PaperInfo
+from src.utils.dao import SemanticScholarTool, PaperProcessor
+from src.component.paper_info import SemanticScholarInfo
 
+import env as paper_env
 
 class SearchEngine:
     semantic_tool = SemanticScholarTool()
+    def SearchWithPaperIds(self, paper_ids):
+        paper_infos = self.semantic_tool.GetPapersWithListPaperId(paper_ids)
+        res = {'success':{}, 'failed':{}}
+        for paper_id in paper_ids:
+            if paper_id in paper_infos:
+                paper_info:SemanticScholarInfo = paper_infos[paper_id]
+                res['success'].update(self.__dealWithPaperInfo(paper_id, paper_info))
+            else:
+                res['failed'][paper_id] = {}
+        return res
 
     def SearchWithPapersFolder(self, source_dir):
         file_names:list[str] = [file for file in os.listdir(source_dir) if file.endswith('.pdf')]
@@ -14,18 +25,19 @@ class SearchEngine:
         for file_name in file_names:
             identity_id = file_name.rsplit('.pdf', 1)[0]
             if identity_id in paper_infos:
-                paper_info:PaperInfo = paper_infos[identity_id]
-                res['success'].update(self.__dealWithPaperInfo(os.path.join(source_dir, file_name), paper_info))
+                paper_info:SemanticScholarInfo = paper_infos[identity_id]
+                res['success'].update(self.__dealWithPaperInfo(identity_id, paper_info))
             else:
-                res['failed'][os.path.join(source_dir, file_name)] = {}
+                res['failed'][identity_id] = {}
         return res
     
     def SearchWithTitle(self, paper_path:str, title:str):
         file_name = paper_path.rsplit('\\', 1)[-1].rsplit('/', 1)[-1]
         if not file_name.endswith('.pdf'):
             return None
+        identity_id = file_name.rsplit('.pdf', 1)[0]
         paper_info = self.semantic_tool.SearchPaperWithKeyword(title)
-        return self.__dealWithPaperInfo(paper_path, paper_info)
+        return self.__dealWithPaperInfo(identity_id, paper_info)
     
     
     def SearchWithDoi(self, paper_path:str, doi:str):
@@ -35,8 +47,9 @@ class SearchEngine:
         if not file_name.endswith('.pdf'):
             return None
         paper_id = AssignPaperId(doi)
+        identity_id = file_name.rsplit('.pdf', 1)[0]
         paper_info = self.semantic_tool.GetPaperFromPaperId(paper_id)
-        return self.__dealWithPaperInfo(paper_path, paper_info)
+        return self.__dealWithPaperInfo(identity_id, paper_info)
         
     def SearchWithPaperId(self, paper_path:str, identity_id = None):
         def AssignPaperId(identity_id):
@@ -50,11 +63,11 @@ class SearchEngine:
             return None
         paper_id = AssignPaperId(identity_id)
         paper_info = self.semantic_tool.GetPaperFromPaperId(paper_id)
-        return self.__dealWithPaperInfo(paper_path, paper_info)
+        return self.__dealWithPaperInfo(identity_id, paper_info)
 
-    def __dealWithPaperInfo(paper_path, paper_info:PaperInfo):
+    def __dealWithPaperInfo(file_name, paper_info:SemanticScholarInfo):
         if not paper_info:
             return None
         paper_data = paper_info.get_data()
-        return {paper_path:paper_data}
+        return {file_name:paper_data}
     

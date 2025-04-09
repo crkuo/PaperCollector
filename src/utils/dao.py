@@ -1,19 +1,36 @@
 import requests
 import datetime
 import os, json, re
-from utils.sqliteconnector import SqliteHelper
-from component.paper_info import PaperInfo
-class SemanticScholarTool:
+from src.utils.sqliteconnector import SqliteHelper
+from src.component.paper_info import SemanticScholarInfo, OpenAlexToolInfo
+
+class OpenAlexTool:
     def __init__(self, fields:list=['title','authors','publicationDate','externalIds','citationCount','url','fieldsOfStudy','citations','references']):
         self.fields = fields
 
-    def GetPaperFromArXiv(self, arXiv_id:str)->PaperInfo:
-        req = requests.get(f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arXiv_id.split('v')[0]}?&fields={','.join(self.fields)}")
+    def GetPaperFromArXiv(self, arXiv_id:str)->SemanticScholarInfo:
+        req = requests.get(f"https://api.openalex.org/works?filter=primary_location.landing_page_url:https://arxiv.org/abs/{arXiv_id}&select={','.join(self.fields)}")
         if req.status_code == 200:
-            return PaperInfo(req.json())
+            return OpenAlexToolInfo(req.json())
         else:
             raise None
-        
+
+    def GetPaperFromDoi(self, doi:str)->SemanticScholarInfo:
+        req = requests.get(f"https://api.openalex.org/works?filter=doi:{doi}&select={','.join(self.fields)}")
+        if req.status_code == 200:
+            return OpenAlexToolInfo(req.json())
+        else:
+            return None
+
+    def SearchPaperWithKeyword(self, keyword:str)->SemanticScholarInfo:
+        req = requests.get(f"https://api.openalex.org/works?filter=abstract.search:{keyword}&select={','.join(self.fields)}&limit=1")
+        if req.status_code == 200:
+            if req.json()["total"]>0:
+                return OpenAlexToolInfo(req.json()["data"][0])
+            else:
+                return None
+        else:
+            return None
     def GetPapersWithListPaperId(self, paper_id_list:list)->dict:
         paperDataPair = dict()
         paperIds = list()
@@ -31,30 +48,87 @@ class SemanticScholarTool:
         for i, paperInformation in enumerate(req.json()):
             if paperInformation:
                 paperInformation['identifyId'] = paper_id_list[i]
-                paperDataPair[paper_id_list[i]] = PaperInfo(paperInformation)
+                paperDataPair[paper_id_list[i]] = OpenAlexToolInfo(paperInformation)
         return paperDataPair
 
-    def GetPaperFromPaperId(self, paperId:str)->PaperInfo:
+
+class SemanticScholarTool:
+    """
+    Due to an official announcement from the Semantic Scholar API:
+
+    ----------------------------------------------------
+    Request a Semantic Scholar API Key (Waitlist)
+    Our API key issuance is currently on pause due to high demand.
+    Please complete this form to join the waitlist,
+    and we'll resume the process as soon as keys become available again.
+    Thank you for your patience!
+    ----------------------------------------------------
+
+    We are unable to request or obtain a new API key at this time,
+    making the Semantic Scholar API inaccessible for metadata retrieval.
+
+    [Impacts]
+    - Any functionality that relies on the Semantic Scholar API for academic paper metadata or citation data is currently disabled.
+    - Automated processes that reference the Semantic Scholar endpoint may fail or be incomplete.
+
+    [Alternative Solutions]
+    1. OpenAlex
+    - API:  https://api.openalex.org/works
+    - Docs: https://docs.openalex.org/api
+    """
+    def __init__(self, fields:list=['title','authors','publicationDate','externalIds','citationCount','url','fieldsOfStudy','citations','references']):
+        self.fields = fields
+
+    def GetPaperFromArXiv(self, arXiv_id:str)->SemanticScholarInfo:
+        req = requests.get(f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arXiv_id.split('v')[0]}?&fields={','.join(self.fields)}")
+        if req.status_code == 200:
+            return SemanticScholarInfo(req.json())
+        else:
+            raise None
+        
+    def GetPapersWithListPaperId(self, paper_id_list:list)->dict:
+        paperDataPair = dict()
+        paperIds = list()
+        for paperId in paper_id_list:
+            arxiv_valid = re.match("\d{4}\.\d{5}", paperId)
+            if arxiv_valid:
+                paperIds.append(f'ARXIV:{arxiv_valid.group()}')
+            else:
+                paperIds.append(paperId)
+        req = requests.post(
+            'https://api.semanticscholar.org/graph/v1/paper/batch',
+            params = {'fields': ','.join(self.fields)},
+            json = {"ids": paperIds}
+            )
+        print(req.json())
+        for i, paperInformation in enumerate(req.json()):
+            if paperInformation:
+                paperInformation['identifyId'] = paper_id_list[i]
+                paperDataPair[paper_id_list[i]] = SemanticScholarInfo(paperInformation)
+        return paperDataPair
+
+    def GetPaperFromPaperId(self, paperId:str)->SemanticScholarInfo:
         req = requests.get(f"https://api.semanticscholar.org/graph/v1/paper/{paperId}?&fields={','.join(self.fields)}")
         if req.status_code == 200:
-            return PaperInfo(req.json())
+            return SemanticScholarInfo(req.json())
         else:
             return None
 
-    def SearchPaperWithKeyword(self, keyword:str)->PaperInfo:
+    def SearchPaperWithKeyword(self, keyword:str)->SemanticScholarInfo:
         req = requests.get(f"https://api.semanticscholar.org/graph/v1/paper/search?query={keyword}&fields={','.join(self.fields)}&limit=1")
         if req.status_code == 200:
             if req.json()["total"]>0:
-                return PaperInfo(req.json()["data"][0])
+                return SemanticScholarInfo(req.json()["data"][0])
             else:
                 raise None
         else:
             return None
         
 
+      
 
 class PaperProcessor:
-    def __init__(self, paperData:PaperInfo):
+    def __init__(self, paperData:SemanticScholarInfo):
         self.paperData = paperData.get_data()
         self.PaperInfo = paperData
         self.CreateOrIgnorePaperTable()
@@ -268,6 +342,18 @@ graph TD;
         result = SqliteHelper('paper_db').ExecuteSelect(sql)
         return [sub_result[0] for sub_result in result]
     
+    def GeneratePaperFolderByData(self, pdf_file_data, target_folder):
+        paper_id = self.getPaperId()
+        paper_path = os.path.join(target_folder, f"{paper_id}.pdf")
+        with open(paper_path, 'wb') as fp:
+            fp.write(pdf_file_data)
+        md_path = os.path.join(os.path.join(target_folder, f"{paper_id}-intro.md"))
+        self.GeneratePaperSetting(target_folder)
+        self.UpdatePaperInfo(target_folder)
+        self.WritePaperInfo(md_path)
+        self.GeneratePaperNote(paper_id, target_folder)
+        self.UpdatePaperLink()
+
     def CreateNewPaperFolder(self, pdf_file_path, target_folder):
         paper_id = self.getPaperId()
         paperPath = os.path.join(target_folder, f"{paper_id}.pdf")
