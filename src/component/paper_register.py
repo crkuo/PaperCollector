@@ -1,6 +1,6 @@
 import os , sys, datetime, shutil, json, re
 from utils.dao import SemanticScholarTool, PaperProcessor
-from component.paper_info import PaperInfo
+from component.paper_info import SemanticScholarInfo
 
 
 
@@ -20,7 +20,7 @@ class PaperRegister:
             identify_id = file_name.rsplit('.pdf', 1)[0]
             if identify_id in paper_infos:
                 try:
-                    paper_info:PaperInfo = paper_infos[identify_id]
+                    paper_info:SemanticScholarInfo = paper_infos[identify_id]
                     processor = PaperProcessor(paper_info)
                     paper_data = paper_info.get_data()
                     publication_date = datetime.datetime.strptime(paper_data['publicationDate'], "%Y-%m-%d").strftime('%Y%m%d') if paper_data['publicationDate'] else "Null"
@@ -36,7 +36,7 @@ class PaperRegister:
         return res
 
 
-    def RegisterWithPaperInfo(self, paper_info:PaperInfo, paper_path, target_dir:str=None):
+    def RegisterWithPaperInfo(self, paper_info:SemanticScholarInfo, paper_path, target_dir:str=None):
         try:
             processor = PaperProcessor(paper_info)
             paper_data = paper_info.get_data()

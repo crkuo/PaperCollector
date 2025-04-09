@@ -8,7 +8,7 @@ import os
 import sys
 import json 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 import traceback
 from src.component.search_engine import SearchEngine
 from src.utils.dao import PaperProcessor
@@ -19,15 +19,17 @@ import env as paper_env
 search_engine = SearchEngine()
 
 @csrf_exempt
-def FindPaperByFolder(request):
+def FindPaperByPaperIds(request):
     if request.method == "POST":
         data = json.loads(request.body)
-        source_folder = data.get('source_folder', None)
-        if not source_folder:
+        paper_ids = data.get('paperIds', None)
+        if not paper_ids:
             return JsonResponse({"action":"invalid input"}, status=422)
         target_folder = paper_env.ASSET_FOLDER
-        res = search_engine.SearchWithPapersFolder(source_folder, target_folder)
+        res = search_engine.SearchWithPaperIds(paper_ids)
         return JsonResponse({"action":"executed", "result":res})
+    else:
+        return JsonResponse({"message":f"Invalid method {request.method}"}, status=502)
 
 @csrf_exempt
 def FindPaperByDoi(request):
