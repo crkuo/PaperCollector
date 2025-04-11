@@ -88,7 +88,7 @@ def AcceptChange(paper_infos, target_dir = None):
             processor = PaperProcessor(paper_info)
             os.makedirs(folder_name, exist_ok=True)
             processor.CreateNewPaperFolder(paper_path, folder_name)
-            res['data']['failed'][paper_path] = folder_name
+            res['data']['success'][paper_path] = folder_name
         except Exception:
             res['data']['failed'][paper_path] = traceback.format_exc()
 

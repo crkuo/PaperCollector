@@ -1,5 +1,6 @@
 import requests
 import datetime
+import shutil
 import os, json, re
 from src.utils.sqliteconnector import SqliteHelper
 from src.component.paper_info import SemanticScholarInfo, OpenAlexToolInfo
@@ -31,6 +32,7 @@ class OpenAlexTool:
                 return None
         else:
             return None
+        
     def GetPapersWithListPaperId(self, paper_id_list:list)->dict:
         paperDataPair = dict()
         paperIds = list()
@@ -100,7 +102,8 @@ class SemanticScholarTool:
             params = {'fields': ','.join(self.fields)},
             json = {"ids": paperIds}
             )
-        print(req.json())
+        if not req.ok:
+            return paperDataPair
         for i, paperInformation in enumerate(req.json()):
             if paperInformation:
                 paperInformation['identifyId'] = paper_id_list[i]
@@ -128,19 +131,65 @@ class SemanticScholarTool:
       
 
 class PaperProcessor:
-    def __init__(self, paperData:SemanticScholarInfo):
-        self.paperData = paperData.get_data()
-        self.PaperInfo = paperData
+    def __init__(self, paperData:dict):
+        self.paperData = paperData
         self.CreateOrIgnorePaperTable()
-        
-    def WritePaperInfo(self, target_path:str , paperData=None):
+    
+    def refactorTitle(self, paper_title):
+        paper_title = paper_title.replace("?", "").replace(":", "").replace("/", "-").replace("\\", "-")
+        paper_title = re.sub(r'<[^>]+>', '', paper_title)
+        paper_title = re.sub(r'\$(.*?)\$', '', paper_title)
+        paper_title = paper_title.strip()
+        return paper_title
+    
+    def GeneratePaperFolder(self, target_dir, paper_path, remove_old_paper=False):
+        try:
+            publication_date = datetime.datetime.strptime(self.paperData['publicationDate'], "%Y-%m-%d").strftime('%Y%m%d') if self.paperData['publicationDate'] else "Unknown"
+            paper_title = self.refactorTitle(self.paperData['title'])
+            folder_name = os.path.join(target_dir, f"{publication_date} {paper_title}")
+            os.makedirs(folder_name, exist_ok=True)
+            self.CreateNewPaperFolder(paper_path, folder_name, remove_old_file=remove_old_paper)
+        except Exception:
+            import traceback
+            print(traceback.format_exc())
 
+
+    def CreateNewPaperFolderByData(self, pdf_file_data, target_folder):
+        paper_id = self.getPaperId()
+        paper_path = os.path.join(target_folder, f"{paper_id}.pdf")
+        with open(paper_path, 'wb') as fp:
+            fp.write(pdf_file_data)
+        md_path = os.path.join(os.path.join(target_folder, f"{paper_id}-intro.md"))
+        self.GeneratePaperSetting(target_folder)
+        self.UpdatePaperInfo(target_folder)
+        self.WritePaperInfo(md_path)
+        self.GeneratePaperNote(paper_id, target_folder)
+        self.UpdatePaperLink()
+
+    def CreateNewPaperFolder(self, pdf_file_path, target_folder, remove_old_file=False):
+        paper_id = self.getPaperId()
+        new_paper_path = os.path.join(target_folder, f"{paper_id}.pdf")
+        if not os.path.exists(new_paper_path):
+            shutil.move(pdf_file_path, new_paper_path)
+        else:
+            if remove_old_file:
+                os.remove(new_paper_path)
+                shutil.move(pdf_file_path, new_paper_path)
+        md_path = os.path.join(os.path.join(target_folder, f"{paper_id}-intro.md"))
+        self.GeneratePaperSetting(target_folder)
+        self.UpdatePaperInfo(target_folder)
+        self.WritePaperInfo(md_path)
+        self.GeneratePaperNote(paper_id, target_folder)
+        self.UpdatePaperLink()
+
+
+    def WritePaperInfo(self, target_path:str , paperData=None):
         def attachCurrentDate():
             return f"<span style='font-size:11;float:right;'>Information Update:{datetime.datetime.now().strftime('%b %d, %Y')}</span>"
         if paperData is None:
             paperData = self.paperData
         paper_id = paperData['paperId']
-        title = paperData['title']
+        paper_title = paperData['title']
         url = paperData['url']
         publication_date = paperData['publicationDate']
         external_id = paperData['externalIds']
@@ -148,7 +197,7 @@ class PaperProcessor:
         fields_of_study = paperData['fieldsOfStudy']
         author = paperData['authors']
         paper_summary = f"""## Information 
-- Title: {title}
+- Title: {paper_title}
 - Author: {author}
 - Publication Date: {publication_date}
 - Citation: {citationCount}
@@ -170,37 +219,46 @@ class PaperProcessor:
                 fp.write(f"![[{paperId}-intro]]")
             
     def CreateOrIgnorePaperTable(self):
-        sql = """
-CREATE TABLE IF NOT EXISTS paper_information
-(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-identifyId VARCHAR(128) NOT NULL,
-paperId VARCHAR(128) NOT NULL,
-title VARCHAR(256) NOT NULL,
-authors TEXT NOT NULL,
-citationCount INT NOT NULL DEFAULT 0,
-publicationDate DATE NOT NULL,
-fieldsOfStudy VARCHAR(128) NOT NULL,
-url TEXT NOT NULL,
-location TEXT NOT NULL,
-paperPath TEXT NOT NULL
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS paperId_index ON paper_information(paperId);
-
-
+        SqliteHelper('paper_db').ExecuteUpdate("""
+            CREATE TABLE IF NOT EXISTS paper_information
+            (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identifyId VARCHAR(128) NOT NULL,
+            paperId VARCHAR(128) NOT NULL,
+            title VARCHAR(256) NOT NULL,
+            authors TEXT NOT NULL,
+            citationCount INT NOT NULL DEFAULT 0,
+            publicationDate DATE NOT NULL,
+            fieldsOfStudy VARCHAR(128) NOT NULL,
+            url TEXT NOT NULL,
+            location TEXT NOT NULL,
+            paperPath TEXT NOT NULL
+            );""")
+        SqliteHelper('paper_db').ExecuteUpdate("CREATE UNIQUE INDEX IF NOT EXISTS paperId_index ON paper_information(paperId);")
+        SqliteHelper('paper_db').ExecuteUpdate("""
 CREATE TABLE IF NOT EXISTS paper_link
 (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 source_id INT NOT NULL,
 citation_id INT NOT NULL
-);
+);""")
+        SqliteHelper('paper_db').ExecuteUpdate("CREATE INDEX IF NOT EXISTS paper_source_query ON paper_link(source_id);")
+        SqliteHelper('paper_db').ExecuteUpdate("CREATE INDEX IF NOT EXISTS paper_citation_query ON paper_link(citation_id);")
+        SqliteHelper('paper_db').ExecuteUpdate("CREATE UNIQUE INDEX IF NOT EXISTS paper_link_pair ON paper_link(source_id, citation_id);")
+        SqliteHelper('paper_db').ExecuteUpdate("""
+CREATE TABLE IF NOT EXISTS field_link
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	field_id VARCHAR(128) NOT NULL,
+	paper_id VARCHAR(128) NOT NULL
+);""")
 
-CREATE INDEX IF NOT EXISTS paper_source_query ON paper_link(source_id);
-CREATE INDEX IF NOT EXISTS paper_citation_query ON paper_link(citation_id);
-CREATE UNIQUE INDEX IF NOT EXISTS paper_link_pair ON paper_link(source_id, citation_id);
-"""
-        return SqliteHelper('paper_db').ExecuteUpdate(sql)
+        SqliteHelper('paper_db').ExecuteUpdate("""CREATE TABLE IF NOT EXISTS field
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name VARCHAR(128) NOT NULL
+);""")
+        return 
 
         
     def GeneratePaperSetting(self, target_dir:str):
@@ -277,7 +335,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS paper_link_pair ON paper_link(source_id, citat
     def RewritePaperInformation(self, paper_ids):
         if len(paper_ids)>0:
             sql = f"""SELECT paperId, location FROM paper_information WHERE paperId IN ('{"','".join(paper_ids)}')"""
-            paper_locs = {paper_info["paperId"]:paper_info['location'] for paper_info in SqliteHelper('paper_db').ExecuteSelect(sql)}
+            paper_locs = {paper_info["paperId"]:paper_info['location'] for paper_info in SqliteHelper('paper_db').ExecuteDictSelect(sql)}
             for paper_id in paper_ids:
                 if os.path.exists(os.path.join(paper_locs[paper_id], 'config.json')):
                     with open(os.path.join(paper_locs[paper_id], 'config.json'), 'r') as fp:
@@ -299,7 +357,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS paper_link_pair ON paper_link(source_id, citat
         reference_ids = self.GetReferences(paper_id)
         citation_ids = self.GetCitations(paper_id)
         current_paper_info = self.GetPapersInformation([paper_id])[0]
-        reference_infos = self.GetPapersInformation((reference_ids))
+        reference_infos = self.GetPapersInformation(reference_ids)
         reference_link = [[ reference_info, current_paper_info] for reference_info in reference_infos]
         citation_infos = self.GetPapersInformation(citation_ids)
         citation_link = [[ current_paper_info, citation_info] for citation_info in citation_infos]
@@ -311,7 +369,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS paper_link_pair ON paper_link(source_id, citat
             mermaid_string = f"""## Relationship
 ```mermaid
 graph TD;
-{newline_sign.join([f"{paper_info['paperId']}[{paper_info['title']}]" for paper_info in paper_infos])}
+{newline_sign.join([f"{paper_info['paperId']}[{self.refactorTitle(paper_info['title'])}]" for paper_info in paper_infos])}
 \n
 {newline_sign.join([f"{createPaperLinkString(link[0], link[1])}" for link in paper_link])}
 ```
@@ -322,49 +380,21 @@ graph TD;
         return mermaid_string
     
     def GetPapersInformation(self, paper_ids:list):
-        sql = f"""
-            SELECT * FROM paper_information WHERE paperId IN ('{"','".join(paper_ids)}')
-        """
+        sql = f"""SELECT * FROM paper_information WHERE paperId IN ('{"','".join(paper_ids)}')"""
         result = SqliteHelper('paper_db').ExecuteDictSelect(sql)
         return result
 
     def GetReferences(self, paperId):
-        sql = f"""
-            SELECT source_id FROM paper_link WHERE citation_id = '{paperId}'
-        """
+        sql = f"""SELECT source_id FROM paper_link WHERE citation_id = '{paperId}'"""
         result = SqliteHelper('paper_db').ExecuteSelect(sql)
         return [sub_result[0] for sub_result in result]
         
     def GetCitations(self, paperId):
-        sql = f"""
-            SELECT citation_id FROM paper_link WHERE source_id = '{paperId}'
-        """
+        sql = f"""SELECT citation_id FROM paper_link WHERE source_id = '{paperId}'"""
         result = SqliteHelper('paper_db').ExecuteSelect(sql)
         return [sub_result[0] for sub_result in result]
     
-    def GeneratePaperFolderByData(self, pdf_file_data, target_folder):
-        paper_id = self.getPaperId()
-        paper_path = os.path.join(target_folder, f"{paper_id}.pdf")
-        with open(paper_path, 'wb') as fp:
-            fp.write(pdf_file_data)
-        md_path = os.path.join(os.path.join(target_folder, f"{paper_id}-intro.md"))
-        self.GeneratePaperSetting(target_folder)
-        self.UpdatePaperInfo(target_folder)
-        self.WritePaperInfo(md_path)
-        self.GeneratePaperNote(paper_id, target_folder)
-        self.UpdatePaperLink()
 
-    def CreateNewPaperFolder(self, pdf_file_path, target_folder):
-        paper_id = self.getPaperId()
-        paperPath = os.path.join(target_folder, f"{paper_id}.pdf")
-        if not os.path.exists(paperPath):
-            os.rename(pdf_file_path, paperPath)
-        mdPath = os.path.join(os.path.join(target_folder, f"{paper_id}-intro.md"))
-        self.GeneratePaperSetting(target_folder)
-        self.UpdatePaperInfo(target_folder)
-        self.WritePaperInfo(mdPath)
-        self.GeneratePaperNote(paper_id, target_folder)
-        self.UpdatePaperLink()
 
 class PaperDataChecker:
     def __init__(self):
